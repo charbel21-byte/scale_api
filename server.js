@@ -646,9 +646,7 @@ app.patch('/api/projects/:id/status', async (req, res) => {
     });
   }
 });
-app.use(cors());
-app.use(express.json());
-const PORT = process.env.PORT || 3000;
+
 
 const db = mysql.createPool({
   host: process.env.MYSQLHOST || process.env.DB_HOST || '127.0.0.1',
