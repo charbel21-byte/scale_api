@@ -2652,9 +2652,8 @@ app.patch('/api/admin/lists/:listId/final-decision', async (req, res) => {
     });
   }
 });
-app.listen(PORT, () => {
-  console.log(`Scale API running on http://localhost:${PORT}`);
-});
+
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
