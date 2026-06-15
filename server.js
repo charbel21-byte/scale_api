@@ -4106,40 +4106,72 @@ app.get('/api/attendance-export', async (req, res) => {
 // PAYROLL FROM ATTENDANCE
 // =========================
 
+// =========================
+// PAYROLL PREVIEW FROM labor_attendance
+// Works for Flutter POST request
+// =========================
+
 app.post('/api/payroll/preview', async (req, res) => {
   try {
-    const { start_date, end_date } = req.body;
+    const startDate = String(
+      req.body.startDate ||
+      req.body.start_date ||
+      req.query.startDate ||
+      req.query.start_date ||
+      ''
+    ).trim();
 
-    if (!start_date || !end_date) {
+    const endDate = String(
+      req.body.endDate ||
+      req.body.end_date ||
+      req.query.endDate ||
+      req.query.end_date ||
+      ''
+    ).trim();
+
+    if (!startDate || !endDate) {
       return res.status(400).json({
         success: false,
-        error: 'Start date and end date are required',
+        message: 'Start date and end date are required.',
       });
     }
 
-    const [rows] = await pool.execute(
+    const [rows] = await db.query(
       `
       SELECT
-        a.labor_id,
-        a.labor_name,
-        a.project_id,
-        a.project_name,
-        COUNT(DISTINCT a.date) AS days_worked,
-        COALESCE(r.daily_rate, 0) AS daily_rate,
-        GROUP_CONCAT(DISTINCT DATE_FORMAT(a.date, '%Y-%m-%d') ORDER BY a.date SEPARATOR ', ') AS attendance_dates
-      FROM attendance a
-      LEFT JOIN labor_rates r ON r.labor_id = a.labor_id
-      WHERE a.accountant_visible = 1
-        AND a.date BETWEEN ? AND ?
+        labor_code AS labor_id,
+        labor_code,
+        labor_name,
+        project_id,
+        project_name,
+        project_code,
+
+        COUNT(DISTINCT attendance_date) AS days_worked,
+
+        0 AS daily_rate,
+        0 AS total_salary,
+
+        GROUP_CONCAT(
+          DISTINCT DATE_FORMAT(attendance_date, '%Y-%m-%d')
+          ORDER BY attendance_date
+          SEPARATOR ', '
+        ) AS attendance_dates
+
+      FROM labor_attendance
+
+      WHERE attendance_date BETWEEN ? AND ?
+        AND check_in_time IS NOT NULL
+
       GROUP BY
-        a.labor_id,
-        a.labor_name,
-        a.project_id,
-        a.project_name,
-        r.daily_rate
-      ORDER BY a.labor_name ASC
+        labor_code,
+        labor_name,
+        project_id,
+        project_name,
+        project_code
+
+      ORDER BY labor_name ASC
       `,
-      [start_date, end_date]
+      [startDate, endDate]
     );
 
     const data = rows.map((row) => {
@@ -4154,16 +4186,22 @@ app.post('/api/payroll/preview', async (req, res) => {
       };
     });
 
-    res.json({
+    return res.json({
       success: true,
+      startDate,
+      endDate,
+      total: data.length,
+      rows: data,
+      items: data,
       data,
     });
   } catch (error) {
-    console.error(error);
+    console.error('Payroll preview POST error:', error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: 'Failed to generate payroll preview',
+      message: 'Failed to preview payroll.',
+      error: error.message,
     });
   }
 });
