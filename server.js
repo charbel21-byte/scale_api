@@ -658,104 +658,7 @@ const db = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
 });
-app.get('/api/engineer/projects', async (req, res) => {
-  try {
-    const engineerId = String(req.query.engineer_uid || req.query.engineerId || '').trim();
 
-    if (!engineerId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Engineer ID is required.'
-      });
-    }
-
-    const [rows] = await db.query(
-      `
-      SELECT
-        p.id,
-        p.name,
-        p.code,
-        p.description,
-        p.active,
-        p.created_at
-      FROM projects p
-      INNER JOIN project_assignments pa
-        ON pa.project_id = p.id
-      WHERE pa.user_id = ?
-        AND pa.role = 'engineer'
-        AND p.active = 1
-      ORDER BY p.name ASC
-      `,
-      [engineerId]
-    );
-
-    return res.json({
-      success: true,
-      projects: rows,
-      data: rows
-    });
-  } catch (error) {
-    console.error('Get engineer projects error:', error);
-
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to load engineer projects.',
-      error: error.message
-    });
-  }
-});
-app.get('/api/users/by-role', async (req, res) => {
-  try {
-    const role = String(req.query.role || '').trim();
-    const activeOnly = String(req.query.activeOnly || '1') === '1';
-
-    if (!role) {
-      return res.status(400).json({
-        success: false,
-        message: 'Role is required.',
-      });
-    }
-
-    let sql = `
-      SELECT
-        id,
-        employee_id,
-        full_name,
-        email,
-        phone,
-        address,
-        role,
-        active,
-        created_at
-      FROM users
-      WHERE role = ?
-    `;
-
-    const params = [role];
-
-    if (activeOnly) {
-      sql += ` AND active = 1`;
-    }
-
-    sql += ` ORDER BY full_name ASC`;
-
-    const [rows] = await db.query(sql, params);
-
-    return res.json({
-      success: true,
-      users: rows,
-      data: rows,
-    });
-  } catch (error) {
-    console.error('Get users by role error:', error);
-
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to load users by role.',
-      error: error.message,
-    });
-  }
-});
 
 app.get('/', (req, res) => {
   res.json({
@@ -2659,10 +2562,7 @@ const pool = mysql.createPool({
   user: process.env.DB_USER,
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 10,
 });
-
 app.get('/api/test', (req, res) => {
   res.json({
     success: true,
@@ -3838,12 +3738,14 @@ app.get('/api/engineer/projects', async (req, res) => {
 
 app.get('/api/engineer/projects/:projectId/lists', async (req, res) => {
   try {
-    const projectId = req.params.projectId;
+    const projectId = String(req.params.projectId || '').trim();
 
-    const engineerUid =
+    const engineerUid = String(
       req.query.engineer_uid ||
       req.query.engineerId ||
-      req.query.engineerUid;
+      req.query.engineerUid ||
+      ''
+    ).trim();
 
     if (!projectId || !engineerUid) {
       return res.status(400).json({
@@ -3852,31 +3754,51 @@ app.get('/api/engineer/projects/:projectId/lists', async (req, res) => {
       });
     }
 
-   const [lists] = await db.query(
+    console.log('Loading engineer lists:', {
+      projectId,
+      engineerUid,
+    });
+
+    const [lists] = await db.query(
       `
       SELECT
-        id,
-        project_id AS projectId,
-        engineer_uid AS engineerUid,
-        title,
-        status,
-        list_date AS listDate,
-        expires_at AS expiresAt,
-        type,
-        grand_total AS grandTotal,
-        created_at AS createdAt,
-        updated_at AS updatedAt
-      FROM engineer_lists
-      WHERE project_id = ?
-        AND engineer_uid = ?
-      ORDER BY created_at DESC
+        el.id,
+        el.project_id AS projectId,
+        el.engineer_uid AS engineerUid,
+        el.title,
+        el.status,
+        el.list_date AS listDate,
+        el.expires_at AS expiresAt,
+        el.type,
+        COALESCE(el.grand_total, 0) AS grandTotal,
+        el.created_at AS createdAt,
+        el.updated_at AS updatedAt,
+        COUNT(i.id) AS itemCount
+      FROM engineer_lists el
+      LEFT JOIN engineer_list_items i
+        ON i.list_id = el.id
+      WHERE el.project_id = ?
+        AND el.engineer_uid = ?
+      GROUP BY
+        el.id,
+        el.project_id,
+        el.engineer_uid,
+        el.title,
+        el.status,
+        el.list_date,
+        el.expires_at,
+        el.type,
+        el.grand_total,
+        el.created_at,
+        el.updated_at
+      ORDER BY el.created_at DESC
       `,
-      [projectId, engineerUid.toString()]
+      [projectId, engineerUid]
     );
 
     return res.json({
       success: true,
-      lists: lists,
+      lists,
       data: lists,
     });
   } catch (error) {
