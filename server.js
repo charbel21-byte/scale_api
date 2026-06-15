@@ -2261,10 +2261,19 @@ app.post('/api/stock/movements', async (req, res) => {
 // ACCOUNTANT - PAYROLL PREVIEW FROM LABOR ATTENDANCE
 // ============================================================
 
+// ============================================================
+// ACCOUNTANT - PAYROLL PREVIEW FROM LABOR ATTENDANCE
+// ============================================================
+
 app.get('/api/payroll/preview', async (req, res) => {
   try {
-    const startDate = String(req.query.startDate || req.query.start_date || '').trim();
-    const endDate = String(req.query.endDate || req.query.end_date || '').trim();
+    const startDate = String(
+      req.query.startDate || req.query.start_date || ''
+    ).trim();
+
+    const endDate = String(
+      req.query.endDate || req.query.end_date || ''
+    ).trim();
 
     if (!startDate || !endDate) {
       return res.status(400).json({
@@ -2276,37 +2285,33 @@ app.get('/api/payroll/preview', async (req, res) => {
     const [rows] = await db.query(
       `
       SELECT
-        la.labor_code,
-        la.labor_name,
-        la.project_id,
-        la.project_name,
-        la.project_code,
+        labor_code,
+        labor_name,
+        project_id,
+        project_name,
+        project_code,
 
         COUNT(*) AS days_worked,
 
-        MIN(la.attendance_date) AS period_start,
-        MAX(la.attendance_date) AS period_end,
+        MIN(attendance_date) AS period_start,
+        MAX(attendance_date) AS period_end,
 
-        COALESCE(lr.daily_rate, 0) AS daily_rate,
-        COUNT(*) * COALESCE(lr.daily_rate, 0) AS total_amount
+        0 AS daily_rate,
+        0 AS total_amount
 
-      FROM labor_attendance la
+      FROM labor_attendance
 
-      LEFT JOIN labor_rates lr
-        ON lr.labor_code = la.labor_code
-
-      WHERE la.attendance_date BETWEEN ? AND ?
-        AND la.check_in_time IS NOT NULL
+      WHERE attendance_date BETWEEN ? AND ?
+        AND check_in_time IS NOT NULL
 
       GROUP BY
-        la.labor_code,
-        la.labor_name,
-        la.project_id,
-        la.project_name,
-        la.project_code,
-        lr.daily_rate
+        labor_code,
+        labor_name,
+        project_id,
+        project_name,
+        project_code
 
-      ORDER BY la.labor_name ASC
+      ORDER BY labor_name ASC
       `,
       [startDate, endDate]
     );
@@ -2315,10 +2320,10 @@ app.get('/api/payroll/preview', async (req, res) => {
       success: true,
       startDate,
       endDate,
+      total: rows.length,
       rows,
       items: rows,
       data: rows,
-      total: rows.length,
     });
   } catch (error) {
     console.error('Payroll preview error:', error);
