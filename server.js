@@ -4733,37 +4733,61 @@ app.get('/api/engineer/lists/:listId', async (req, res) => {
     });
   }
 });
+// ============================================================
+// ENGINEER - CREATE LIST AND SEND TO SENIOR
+// ============================================================
+
 app.post('/api/engineer/lists', async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
 
   try {
-    const {
-      project_id,
-      engineer_uid,
-      title,
-      status,
-      list_date,
-      expires_at,
-      items,
-    } = req.body;
+    const body = req.body || {};
 
-    if (!project_id || !engineer_uid || !title || !Array.isArray(items)) {
+    const projectId = String(
+      body.project_id || body.projectId || ''
+    ).trim();
+
+    const engineerUid = String(
+      body.engineer_uid || body.engineerUid || body.engineerId || ''
+    ).trim();
+
+    const title = String(
+      body.title || 'Engineer Material List'
+    ).trim();
+
+    const listDate = String(
+      body.list_date || body.listDate || new Date().toISOString().slice(0, 10)
+    ).trim();
+
+    const expiresAt = body.expires_at || body.expiresAt || null;
+
+    const type = String(
+      body.type || 'material'
+    ).trim();
+
+    const status = String(
+      body.status || 'submitted'
+    ).trim();
+
+    const items = Array.isArray(body.items) ? body.items : [];
+
+    if (!projectId || !engineerUid || !title) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid engineer list data',
+        message: 'Project ID, engineer ID, and title are required.',
       });
     }
 
     if (items.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'At least one item is required',
+        message: 'At least one item is required.',
       });
     }
 
     await connection.beginTransaction();
 
-    const [result] = await connection.execute(
+    const [result] = await connection.query(
       `
       INSERT INTO engineer_lists (
         project_id,
@@ -4771,24 +4795,54 @@ app.post('/api/engineer/lists', async (req, res) => {
         title,
         status,
         list_date,
-        expires_at
+        expires_at,
+        type,
+        grand_total,
+        created_at,
+        updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())
       `,
       [
-        project_id,
-        engineer_uid,
+        projectId,
+        engineerUid,
         title,
-        status || 'draft',
-        list_date,
-        expires_at || null,
+        status === 'draft' ? 'draft' : 'submitted',
+        listDate,
+        expiresAt,
+        type,
       ]
     );
 
     const listId = result.insertId;
 
     for (const item of items) {
-      await connection.execute(
+      const name = String(
+        item.name || item.material || item.description || ''
+      ).trim();
+
+      const qty = Number(
+        item.qty || item.quantity || 0
+      );
+
+      const unit = String(
+        item.unit || ''
+      ).trim();
+
+      const note = String(
+        item.note || item.notes || ''
+      ).trim();
+
+      if (!name || qty <= 0) {
+        await connection.rollback();
+
+        return res.status(400).json({
+          success: false,
+          message: 'Each item must have a name and quantity.',
+        });
+      }
+
+      await connection.query(
         `
         INSERT INTO engineer_list_items (
           list_id,
@@ -4801,84 +4855,131 @@ app.post('/api/engineer/lists', async (req, res) => {
         `,
         [
           listId,
-          item.name || '',
-          Number(item.qty) || 0,
-          item.unit || '',
-          item.note || '',
+          name,
+          qty,
+          unit,
+          note,
         ]
       );
     }
 
     await connection.commit();
 
-    res.json({
+    return res.status(201).json({
       success: true,
+      message:
+        status === 'draft'
+          ? 'List saved as draft successfully.'
+          : 'List submitted to senior accountant successfully.',
       id: listId,
+      list_id: listId,
+      status: status === 'draft' ? 'draft' : 'submitted',
     });
   } catch (error) {
-    await connection.rollback();
+    try {
+      await connection.rollback();
+    } catch (_) {}
 
-    console.error(error);
+    console.error('Create engineer list error:', error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: 'Failed to save engineer list',
+      message: 'Failed to create engineer list.',
+      error: error.message,
     });
   } finally {
     connection.release();
   }
 });
 
+// ============================================================
+// ENGINEER - UPDATE LIST
+// ============================================================
+
 app.put('/api/engineer/lists/:listId', async (req, res) => {
-  const connection = await pool.getConnection();
+  const connection = await db.getConnection();
 
   try {
-    const { listId } = req.params;
+    const listId = Number(req.params.listId);
+    const body = req.body || {};
 
-    const {
-      title,
-      status,
-      items,
-    } = req.body;
+    const title = String(body.title || '').trim();
+    const status = String(body.status || 'submitted').trim();
+    const items = Array.isArray(body.items) ? body.items : [];
 
-    if (!title || !Array.isArray(items)) {
+    if (!listId || !title) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid engineer list data',
+        message: 'List ID and title are required.',
       });
     }
 
     if (items.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'At least one item is required',
+        message: 'At least one item is required.',
       });
     }
 
     await connection.beginTransaction();
 
-    await connection.execute(
+    const [existing] = await connection.query(
+      'SELECT id FROM engineer_lists WHERE id = ? LIMIT 1',
+      [listId]
+    );
+
+    if (existing.length === 0) {
+      await connection.rollback();
+
+      return res.status(404).json({
+        success: false,
+        message: 'List not found.',
+      });
+    }
+
+    await connection.query(
       `
       UPDATE engineer_lists
       SET
         title = ?,
-        status = ?
+        status = ?,
+        updated_at = NOW()
       WHERE id = ?
       `,
       [
         title,
-        status || 'draft',
+        status === 'draft' ? 'draft' : 'submitted',
         listId,
       ]
     );
 
-    await connection.execute(
+    await connection.query(
       'DELETE FROM engineer_list_items WHERE list_id = ?',
       [listId]
     );
 
     for (const item of items) {
-      await connection.execute(
+      const name = String(
+        item.name || item.material || item.description || ''
+      ).trim();
+
+      const qty = Number(
+        item.qty || item.quantity || 0
+      );
+
+      const unit = String(item.unit || '').trim();
+      const note = String(item.note || item.notes || '').trim();
+
+      if (!name || qty <= 0) {
+        await connection.rollback();
+
+        return res.status(400).json({
+          success: false,
+          message: 'Each item must have a name and quantity.',
+        });
+      }
+
+      await connection.query(
         `
         INSERT INTO engineer_list_items (
           list_id,
@@ -4891,27 +4992,35 @@ app.put('/api/engineer/lists/:listId', async (req, res) => {
         `,
         [
           listId,
-          item.name || '',
-          Number(item.qty) || 0,
-          item.unit || '',
-          item.note || '',
+          name,
+          qty,
+          unit,
+          note,
         ]
       );
     }
 
     await connection.commit();
 
-    res.json({
+    return res.json({
       success: true,
+      message:
+        status === 'draft'
+          ? 'List updated as draft.'
+          : 'List submitted to senior accountant.',
+      status: status === 'draft' ? 'draft' : 'submitted',
     });
   } catch (error) {
-    await connection.rollback();
+    try {
+      await connection.rollback();
+    } catch (_) {}
 
-    console.error(error);
+    console.error('Update engineer list error:', error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: 'Failed to update engineer list',
+      message: 'Failed to update engineer list.',
+      error: error.message,
     });
   } finally {
     connection.release();
