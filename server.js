@@ -3017,25 +3017,25 @@ app.post('/api/stock-movements', async (req, res) => {
 
 app.get('/api/tools', async (req, res) => {
   try {
-    const [rows] = await db.query(`
-      SELECT
-        id,
-        tool_code,
-        name,
-        category,
-        status,
-        assigned_project_id,
-        assigned_project_name,
-        assigned_to,
-        location,
-        note,
-        active,
-        created_at,
-        updated_at
-      FROM tools
-      WHERE active = 1
-      ORDER BY created_at DESC
-    `);
+    const [columns] = await db.query(`SHOW COLUMNS FROM tools`);
+
+    const columnNames = columns.map((c) => c.Field);
+
+    let sql = `SELECT * FROM tools`;
+
+    if (columnNames.includes('active')) {
+      sql += ` WHERE active = 1`;
+    }
+
+    if (columnNames.includes('updated_at')) {
+      sql += ` ORDER BY updated_at DESC`;
+    } else if (columnNames.includes('created_at')) {
+      sql += ` ORDER BY created_at DESC`;
+    } else if (columnNames.includes('id')) {
+      sql += ` ORDER BY id DESC`;
+    }
+
+    const [rows] = await db.query(sql);
 
     return res.json({
       success: true,
