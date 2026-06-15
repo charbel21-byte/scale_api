@@ -2449,6 +2449,24 @@ app.post('/api/payroll/submit-to-senior', async (req, res) => {
       ).trim();
 
       const note = String(item.note || '').trim();
+      const paid =
+  item.paid === true ||
+  item.paid === 1 ||
+  item.paid === '1'
+    ? 1
+    : 0;
+
+const paidFrom = String(
+  item.paid_from || item.paidFrom || startDate
+).trim();
+
+const paidTo = String(
+  item.paid_to || item.paidTo || endDate
+).trim();
+
+const paymentStatus = paid
+  ? 'markedPaidByAccountant'
+  : 'notPaid';
 
       if (!laborId || !laborName) {
         await connection.rollback();
@@ -2459,36 +2477,49 @@ app.post('/api/payroll/submit-to-senior', async (req, res) => {
         });
       }
 
-      await connection.query(
-        `
-        INSERT INTO payroll_items (
-          payroll_period_id,
-          labor_id,
-          labor_name,
-          project_id,
-          project_name,
-          days_worked,
-          daily_rate,
-          total_salary,
-          attendance_dates,
-          note
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          payrollPeriodId,
-          laborId,
-          laborName,
-          projectId,
-          projectName,
-          daysWorked,
-          dailyRate,
-          totalSalary,
-          attendanceDates,
-          note,
-        ]
-      );
-
+await connection.query(
+  `
+  INSERT INTO payroll_items (
+    payroll_period_id,
+    labor_id,
+    labor_name,
+    project_id,
+    project_name,
+    days_worked,
+    daily_rate,
+    total_salary,
+    attendance_dates,
+    note,
+    paid,
+    paid_from,
+    paid_to,
+    paid_at,
+    paid_by_uid,
+    paid_by_name,
+    payment_status
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `,
+  [
+    payrollPeriodId,
+    laborId,
+    laborName,
+    projectId,
+    projectName,
+    daysWorked,
+    dailyRate,
+    totalSalary,
+    attendanceDates,
+    note,
+    paid,
+    paid ? paidFrom : null,
+    paid ? paidTo : null,
+    paid ? new Date() : null,
+    paid ? createdById : null,
+    paid ? createdByName : null,
+    paymentStatus,
+  ]
+);
       await connection.query(
         `
         INSERT INTO labor_rates (
