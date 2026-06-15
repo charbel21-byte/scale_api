@@ -658,6 +658,257 @@ const db = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
 });
+// ============================================================
+// FOREMAN ATTENDANCE - CHECK IN / CHECK OUT
+// ============================================================
+
+function todayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+app.post('/api/attendance/scan', async (req, res) => {
+  try {
+    const body = req.body || {};
+
+    const projectId = Number(body.projectId || body.project_id);
+    const projectName = String(body.projectName || body.project_name || '').trim();
+    const laborInput = String(
+      body.laborId ||
+      body.labor_id ||
+      body.laborCode ||
+      body.labor_code ||
+      body.qrToken ||
+      body.qr_token ||
+      ''
+    ).trim();
+
+    const date = String(body.date || body.attendanceDate || body.attendance_date || todayDate()).trim();
+
+    const foremanId = String(body.foremanId || body.foreman_id || '').trim();
+    const foremanName = String(body.foremanName || body.foreman_name || '').trim();
+
+    if (!projectId || !laborInput || !date) {
+      return res.status(400).json({
+        success: false,
+        message: 'Project, labor QR, and date are required.',
+      });
+    }
+
+    const [labors] = await db.query(
+      `
+      SELECT
+        id,
+        labor_code,
+        name,
+        active,
+        assigned_project_id,
+        assigned_project_name,
+        assigned_project_code,
+        qr_token,
+        qr_payload
+      FROM labors
+      WHERE
+        labor_code = ?
+        OR qr_token = ?
+        OR CAST(id AS CHAR) = ?
+      LIMIT 1
+      `,
+      [laborInput, laborInput, laborInput]
+    );
+
+    if (labors.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Labor QR is not registered in the system.',
+      });
+    }
+
+    const labor = labors[0];
+
+    if (Number(labor.active) !== 1) {
+      return res.status(403).json({
+        success: false,
+        message: `${labor.name} is inactive and cannot be checked in.`,
+      });
+    }
+
+    if (Number(labor.assigned_project_id) !== projectId) {
+      return res.status(403).json({
+        success: false,
+        message: `${labor.name} is not assigned to this project.`,
+      });
+    }
+
+    const finalProjectName =
+      projectName || labor.assigned_project_name || 'Unknown Project';
+
+    const finalProjectCode = labor.assigned_project_code || '';
+
+    const [existing] = await db.query(
+      `
+      SELECT *
+      FROM labor_attendance
+      WHERE labor_code = ?
+        AND project_id = ?
+        AND attendance_date = ?
+      LIMIT 1
+      `,
+      [labor.labor_code, projectId, date]
+    );
+
+    if (existing.length === 0) {
+      const [result] = await db.query(
+        `
+        INSERT INTO labor_attendance (
+          labor_id,
+          labor_code,
+          labor_name,
+          project_id,
+          project_name,
+          project_code,
+          attendance_date,
+          check_in_time,
+          checked_in_by_id,
+          checked_in_by_name
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)
+        `,
+        [
+          labor.id,
+          labor.labor_code,
+          labor.name,
+          projectId,
+          finalProjectName,
+          finalProjectCode,
+          date,
+          foremanId,
+          foremanName,
+        ]
+      );
+
+      return res.json({
+        success: true,
+        action: 'checkIn',
+        attendanceAction: 'checkIn',
+        message: `Check-in saved for ${labor.name}.`,
+        laborId: labor.labor_code,
+        laborName: labor.name,
+        recordId: result.insertId,
+      });
+    }
+
+    const record = existing[0];
+
+    if (!record.check_out_time) {
+      await db.query(
+        `
+        UPDATE labor_attendance
+        SET
+          check_out_time = NOW(),
+          checked_out_by_id = ?,
+          checked_out_by_name = ?,
+          updated_at = NOW()
+        WHERE id = ?
+        `,
+        [foremanId, foremanName, record.id]
+      );
+
+      return res.json({
+        success: true,
+        action: 'checkOut',
+        attendanceAction: 'checkOut',
+        message: `Check-out saved for ${labor.name}.`,
+        laborId: labor.labor_code,
+        laborName: labor.name,
+        recordId: record.id,
+      });
+    }
+
+    return res.json({
+      success: true,
+      action: 'completed',
+      attendanceAction: 'completed',
+      message: `${labor.name} already checked in and checked out today.`,
+      laborId: labor.labor_code,
+      laborName: labor.name,
+      recordId: record.id,
+    });
+  } catch (error) {
+    console.error('Attendance scan error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to save attendance scan.',
+      error: error.message,
+    });
+  }
+});
+// ============================================================
+// FOREMAN - TODAY PROJECT ATTENDANCE
+// ============================================================
+
+app.get('/api/attendance/project/:projectId/today', async (req, res) => {
+  try {
+    const projectId = Number(req.params.projectId);
+    const date = String(req.query.date || todayDate()).trim();
+
+    if (!projectId || !date) {
+      return res.status(400).json({
+        success: false,
+        message: 'Project ID and date are required.',
+      });
+    }
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        id,
+        labor_id,
+        labor_code,
+        labor_name,
+        project_id,
+        project_name,
+        project_code,
+        attendance_date,
+        check_in_time,
+        check_out_time,
+        check_in_time AS check_in_at,
+        check_out_time AS check_out_at,
+        checked_in_by_id,
+        checked_in_by_name,
+        checked_out_by_id,
+        checked_out_by_name,
+        created_at,
+        updated_at,
+        CASE
+          WHEN check_in_time IS NOT NULL AND check_out_time IS NOT NULL THEN 'checkedOut'
+          WHEN check_in_time IS NOT NULL AND check_out_time IS NULL THEN 'checkedIn'
+          ELSE 'notCheckedIn'
+        END AS status
+      FROM labor_attendance
+      WHERE project_id = ?
+        AND attendance_date = ?
+      ORDER BY labor_name ASC
+      `,
+      [projectId, date]
+    );
+
+    return res.json({
+      success: true,
+      records: rows,
+      attendance: rows,
+      data: rows,
+    });
+  } catch (error) {
+    console.error('Project attendance today error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load project attendance.',
+      error: error.message,
+    });
+  }
+});
 app.get('/api/labors', async (req, res) => {
   try {
     const [rows] = await db.query(`
@@ -889,9 +1140,16 @@ app.put('/api/labors/:id', async (req, res) => {
 // ACCOUNTANT - ATTENDANCE EXPORT
 // ============================================================
 
+// ============================================================
+// ACCOUNTANT - ATTENDANCE EXPORT
+// ============================================================
+
 app.get('/api/attendance-export', async (req, res) => {
   try {
-    const projectCode = String(req.query.project_code || req.query.projectCode || '').trim();
+    const projectCode = String(
+      req.query.project_code || req.query.projectCode || ''
+    ).trim();
+
     const date = String(req.query.date || '').trim();
 
     if (!projectCode || !date) {
@@ -914,10 +1172,17 @@ app.get('/api/attendance-export', async (req, res) => {
         attendance_date,
         check_in_time,
         check_out_time,
+        check_in_time AS check_in_at,
+        check_out_time AS check_out_at,
         checked_in_by_name,
         checked_out_by_name,
         created_at,
-        updated_at
+        updated_at,
+        CASE
+          WHEN check_in_time IS NOT NULL AND check_out_time IS NOT NULL THEN 'checkedOut'
+          WHEN check_in_time IS NOT NULL AND check_out_time IS NULL THEN 'checkedIn'
+          ELSE 'notCheckedIn'
+        END AS status
       FROM labor_attendance
       WHERE project_code = ?
         AND attendance_date = ?
@@ -927,8 +1192,14 @@ app.get('/api/attendance-export', async (req, res) => {
     );
 
     const total = rows.length;
-    const currentlyIn = rows.filter((r) => r.check_in_time && !r.check_out_time).length;
-    const checkedOut = rows.filter((r) => r.check_in_time && r.check_out_time).length;
+
+    const currentlyIn = rows.filter((r) => {
+      return r.check_in_time && !r.check_out_time;
+    }).length;
+
+    const checkedOut = rows.filter((r) => {
+      return r.check_in_time && r.check_out_time;
+    }).length;
 
     return res.json({
       success: true,
@@ -950,9 +1221,7 @@ app.get('/api/attendance-export', async (req, res) => {
     });
   }
 });
-// ============================================================
-// ENGINEER PROJECTS - RAILWAY MYSQL
-// ============================================================
+
 
 async function loadEngineerProjects(req, res) {
   try {
