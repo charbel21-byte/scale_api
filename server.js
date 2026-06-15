@@ -658,7 +658,80 @@ const db = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
 });
+// ============================================================
+// LABORS ROUTES - RAILWAY MYSQL SAFE VERSION
+// ============================================================
 
+app.get('/api/labors', async (req, res) => {
+  try {
+    const [columns] = await db.query(`SHOW COLUMNS FROM labors`);
+    const columnNames = columns.map((c) => c.Field);
+
+    let sql = `SELECT * FROM labors`;
+
+    if (columnNames.includes('active')) {
+      sql += ` WHERE active = 1`;
+    }
+
+    if (columnNames.includes('updated_at')) {
+      sql += ` ORDER BY updated_at DESC`;
+    } else if (columnNames.includes('created_at')) {
+      sql += ` ORDER BY created_at DESC`;
+    } else if (columnNames.includes('id')) {
+      sql += ` ORDER BY id DESC`;
+    }
+
+    const [rows] = await db.query(sql);
+
+    return res.json({
+      success: true,
+      labors: rows,
+      data: rows,
+    });
+  } catch (error) {
+    console.error('Get labors error:', error);
+
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to load labors',
+      details: error.message,
+    });
+  }
+});
+app.get('/api/projects/active', async (req, res) => {
+  try {
+    const [columns] = await db.query(`SHOW COLUMNS FROM projects`);
+    const columnNames = columns.map((c) => c.Field);
+
+    let sql = `SELECT * FROM projects`;
+
+    if (columnNames.includes('active')) {
+      sql += ` WHERE active = 1`;
+    }
+
+    if (columnNames.includes('name')) {
+      sql += ` ORDER BY name ASC`;
+    } else if (columnNames.includes('id')) {
+      sql += ` ORDER BY id DESC`;
+    }
+
+    const [rows] = await db.query(sql);
+
+    return res.json({
+      success: true,
+      projects: rows,
+      data: rows,
+    });
+  } catch (error) {
+    console.error('Get active projects error:', error);
+
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to load active projects',
+      details: error.message,
+    });
+  }
+});
 
 app.get('/', (req, res) => {
   res.json({
