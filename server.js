@@ -3838,58 +3838,54 @@ app.get('/api/engineer/projects', async (req, res) => {
 
 app.get('/api/engineer/projects/:projectId/lists', async (req, res) => {
   try {
-    const { projectId } = req.params;
-    const engineerUid = (req.query.engineer_uid || '').toString().trim();
+    const projectId = req.params.projectId;
 
-    if (!engineerUid) {
+    const engineerUid =
+      req.query.engineer_uid ||
+      req.query.engineerId ||
+      req.query.engineerUid;
+
+    if (!projectId || !engineerUid) {
       return res.status(400).json({
         success: false,
-        error: 'Engineer UID is required',
+        error: 'Missing projectId or engineer_uid',
       });
     }
 
-    const [rows] = await pool.execute(
+   const [lists] = await db.query(
       `
       SELECT
-        l.id,
-        l.project_id,
-        l.engineer_uid,
-        l.title,
-        l.status,
-        l.list_date,
-        l.expires_at,
-        l.created_at,
-        l.updated_at,
-        COUNT(i.id) AS item_count
-      FROM engineer_lists l
-      LEFT JOIN engineer_list_items i ON i.list_id = l.id
-      WHERE l.project_id = ?
-        AND l.engineer_uid = ?
-      GROUP BY
-        l.id,
-        l.project_id,
-        l.engineer_uid,
-        l.title,
-        l.status,
-        l.list_date,
-        l.expires_at,
-        l.created_at,
-        l.updated_at
-      ORDER BY l.created_at DESC
+        id,
+        project_id AS projectId,
+        engineer_uid AS engineerUid,
+        title,
+        status,
+        list_date AS listDate,
+        expires_at AS expiresAt,
+        type,
+        grand_total AS grandTotal,
+        created_at AS createdAt,
+        updated_at AS updatedAt
+      FROM engineer_lists
+      WHERE project_id = ?
+        AND engineer_uid = ?
+      ORDER BY created_at DESC
       `,
-      [projectId, engineerUid]
+      [projectId, engineerUid.toString()]
     );
 
-    res.json({
+    return res.json({
       success: true,
-      data: rows,
+      lists: lists,
+      data: lists,
     });
   } catch (error) {
-    console.error(error);
+    console.error('Failed to load engineer lists:', error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to load engineer lists',
+      details: error.message,
     });
   }
 });
