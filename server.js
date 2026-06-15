@@ -974,17 +974,20 @@ app.get('/api/attendance-export', async (req, res) => {
       req.query.project_code || req.query.projectCode || ''
     ).trim();
 
+    const projectId = String(
+      req.query.project_id || req.query.projectId || ''
+    ).trim();
+
     const date = String(req.query.date || '').trim();
 
-    if (!projectCode || !date) {
+    if ((!projectCode && !projectId) || !date) {
       return res.status(400).json({
         success: false,
-        message: 'Project code and date are required.',
+        message: 'Project code or project ID and date are required.',
       });
     }
 
-    const [rows] = await db.query(
-      `
+    let sql = `
       SELECT
         id,
         labor_id,
@@ -1008,15 +1011,24 @@ app.get('/api/attendance-export', async (req, res) => {
           ELSE 'notCheckedIn'
         END AS status
       FROM labor_attendance
-      WHERE project_code = ?
-        AND attendance_date = ?
-      ORDER BY labor_name ASC
-      `,
-      [projectCode, date]
-    );
+      WHERE attendance_date = ?
+    `;
+
+    const params = [date];
+
+    if (projectCode) {
+      sql += ` AND project_code = ?`;
+      params.push(projectCode);
+    } else {
+      sql += ` AND project_id = ?`;
+      params.push(projectId);
+    }
+
+    sql += ` ORDER BY labor_name ASC`;
+
+    const [rows] = await db.query(sql, params);
 
     const total = rows.length;
-
     const currentlyIn = rows.filter((r) => {
       return r.check_in_time && !r.check_out_time;
     }).length;
@@ -1028,6 +1040,7 @@ app.get('/api/attendance-export', async (req, res) => {
     return res.json({
       success: true,
       project_code: projectCode,
+      project_id: projectId,
       date,
       total,
       currentlyIn,
