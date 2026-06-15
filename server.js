@@ -2563,6 +2563,7 @@ const pool = mysql.createPool({
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
 });
+
 app.get('/api/test', (req, res) => {
   res.json({
     success: true,
@@ -3010,21 +3011,255 @@ app.post('/api/stock-movements', async (req, res) => {
     connection.release();
   }
 });
+// ============================================================
+// TOOLS TRACKING ROUTES - RAILWAY MYSQL
+// ============================================================
+
 app.get('/api/tools', async (req, res) => {
   try {
-    const [rows] = await pool.execute(
-      'SELECT * FROM tools WHERE active = 1 ORDER BY name ASC'
-    );
+    const [rows] = await db.query(`
+      SELECT
+        id,
+        tool_code,
+        name,
+        category,
+        status,
+        assigned_project_id,
+        assigned_project_name,
+        assigned_to,
+        location,
+        note,
+        active,
+        created_at,
+        updated_at
+      FROM tools
+      WHERE active = 1
+      ORDER BY created_at DESC
+    `);
 
-    res.json({
+    return res.json({
       success: true,
+      tools: rows,
       data: rows,
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({
+    console.error('Get tools error:', error);
+
+    return res.status(500).json({
       success: false,
       error: 'Failed to load tools',
+      details: error.message,
+    });
+  }
+});
+
+app.post('/api/tools', async (req, res) => {
+  try {
+    const body = req.body || {};
+
+    const toolCode = String(body.tool_code || body.toolCode || '').trim();
+    const name = String(body.name || '').trim();
+    const category = String(body.category || '').trim();
+    const status = String(body.status || 'available').trim();
+    const assignedProjectId = String(
+      body.assigned_project_id || body.assignedProjectId || ''
+    ).trim();
+    const assignedProjectName = String(
+      body.assigned_project_name || body.assignedProjectName || ''
+    ).trim();
+    const assignedTo = String(body.assigned_to || body.assignedTo || '').trim();
+    const location = String(body.location || 'Warehouse').trim();
+    const note = String(body.note || '').trim();
+
+    if (!toolCode || !name) {
+      return res.status(400).json({
+        success: false,
+        error: 'Tool code and name are required',
+      });
+    }
+
+    const [result] = await db.query(
+      `
+      INSERT INTO tools (
+        tool_code,
+        name,
+        category,
+        status,
+        assigned_project_id,
+        assigned_project_name,
+        assigned_to,
+        location,
+        note,
+        active
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `,
+      [
+        toolCode,
+        name,
+        category,
+        status,
+        assignedProjectId,
+        assignedProjectName,
+        assignedTo,
+        location,
+        note,
+      ]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Tool saved successfully.',
+      id: result.insertId,
+    });
+  } catch (error) {
+    console.error('Create tool error:', error);
+
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({
+        success: false,
+        error: 'Tool code already exists',
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to save tool',
+      details: error.message,
+    });
+  }
+});
+
+app.put('/api/tools/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const body = req.body || {};
+
+    const toolCode = String(body.tool_code || body.toolCode || '').trim();
+    const name = String(body.name || '').trim();
+    const category = String(body.category || '').trim();
+    const status = String(body.status || 'available').trim();
+    const assignedProjectId = String(
+      body.assigned_project_id || body.assignedProjectId || ''
+    ).trim();
+    const assignedProjectName = String(
+      body.assigned_project_name || body.assignedProjectName || ''
+    ).trim();
+    const assignedTo = String(body.assigned_to || body.assignedTo || '').trim();
+    const location = String(body.location || 'Warehouse').trim();
+    const note = String(body.note || '').trim();
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Tool ID is required',
+      });
+    }
+
+    if (!toolCode || !name) {
+      return res.status(400).json({
+        success: false,
+        error: 'Tool code and name are required',
+      });
+    }
+
+    const [result] = await db.query(
+      `
+      UPDATE tools
+      SET
+        tool_code = ?,
+        name = ?,
+        category = ?,
+        status = ?,
+        assigned_project_id = ?,
+        assigned_project_name = ?,
+        assigned_to = ?,
+        location = ?,
+        note = ?,
+        updated_at = NOW()
+      WHERE id = ?
+      `,
+      [
+        toolCode,
+        name,
+        category,
+        status,
+        assignedProjectId,
+        assignedProjectName,
+        assignedTo,
+        location,
+        note,
+        id,
+      ]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Tool not found',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Tool updated successfully.',
+    });
+  } catch (error) {
+    console.error('Update tool error:', error);
+
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({
+        success: false,
+        error: 'Tool code already exists',
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to update tool',
+      details: error.message,
+    });
+  }
+});
+
+app.delete('/api/tools/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Tool ID is required',
+      });
+    }
+
+    const [result] = await db.query(
+      `
+      UPDATE tools
+      SET active = 0, status = 'lost', updated_at = NOW()
+      WHERE id = ?
+      `,
+      [id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Tool not found',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Tool archived successfully.',
+    });
+  } catch (error) {
+    console.error('Archive tool error:', error);
+
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to archive tool',
+      details: error.message,
     });
   }
 });
