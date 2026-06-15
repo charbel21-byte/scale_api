@@ -886,6 +886,71 @@ app.put('/api/labors/:id', async (req, res) => {
   }
 });
 // ============================================================
+// ACCOUNTANT - ATTENDANCE EXPORT
+// ============================================================
+
+app.get('/api/attendance-export', async (req, res) => {
+  try {
+    const projectCode = String(req.query.project_code || req.query.projectCode || '').trim();
+    const date = String(req.query.date || '').trim();
+
+    if (!projectCode || !date) {
+      return res.status(400).json({
+        success: false,
+        message: 'Project code and date are required.',
+      });
+    }
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        id,
+        labor_id,
+        labor_code,
+        labor_name,
+        project_id,
+        project_name,
+        project_code,
+        attendance_date,
+        check_in_time,
+        check_out_time,
+        checked_in_by_name,
+        checked_out_by_name,
+        created_at,
+        updated_at
+      FROM labor_attendance
+      WHERE project_code = ?
+        AND attendance_date = ?
+      ORDER BY labor_name ASC
+      `,
+      [projectCode, date]
+    );
+
+    const total = rows.length;
+    const currentlyIn = rows.filter((r) => r.check_in_time && !r.check_out_time).length;
+    const checkedOut = rows.filter((r) => r.check_in_time && r.check_out_time).length;
+
+    return res.json({
+      success: true,
+      project_code: projectCode,
+      date,
+      total,
+      currentlyIn,
+      checkedOut,
+      records: rows,
+      data: rows,
+    });
+  } catch (error) {
+    console.error('Attendance export error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load attendance export.',
+      error: error.message,
+    });
+  }
+});
+// ============================================================
 // ENGINEER PROJECTS - RAILWAY MYSQL
 // ============================================================
 
