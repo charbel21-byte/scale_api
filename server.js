@@ -659,6 +659,63 @@ const db = mysql.createPool({
   queueLimit: 0,
 });
 // ============================================================
+// USERS BY ROLE - FOR PROJECT ASSIGNMENTS
+// ============================================================
+
+app.get('/api/users/by-role', async (req, res) => {
+  try {
+    const role = String(req.query.role || '').trim();
+    const activeOnly = String(req.query.activeOnly || '1') === '1';
+
+    if (!role) {
+      return res.status(400).json({
+        success: false,
+        message: 'Role is required.',
+      });
+    }
+
+    let sql = `
+      SELECT
+        id,
+        employee_id,
+        full_name,
+        email,
+        phone,
+        address,
+        role,
+        active,
+        created_at
+      FROM users
+      WHERE role = ?
+    `;
+
+    const params = [role];
+
+    if (activeOnly) {
+      sql += ` AND active = 1`;
+    }
+
+    sql += ` ORDER BY full_name ASC`;
+
+    const [rows] = await db.query(sql, params);
+
+    return res.json({
+      success: true,
+      users: rows,
+      data: rows,
+    });
+  } catch (error) {
+    console.error('Get users by role error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load users by role.',
+      error: error.message,
+    });
+  }
+});
+
+// ============================================================
 // LABORS ROUTES - RAILWAY MYSQL SAFE VERSION
 // ============================================================
 
