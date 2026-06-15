@@ -659,6 +659,71 @@ const db = mysql.createPool({
   queueLimit: 0,
 });
 // ============================================================
+// ENGINEER PROJECTS - RAILWAY MYSQL
+// ============================================================
+
+async function loadEngineerProjects(req, res) {
+  try {
+    const engineerId = String(
+      req.query.engineer_uid ||
+      req.query.engineerId ||
+      req.query.employeeId ||
+      req.params.engineerId ||
+      ''
+    ).trim();
+
+    if (!engineerId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Engineer ID is required.',
+      });
+    }
+
+    const [rows] = await db.query(
+      `
+      SELECT DISTINCT
+        p.id,
+        p.name,
+        p.code,
+        p.description,
+        p.active,
+        p.created_at
+      FROM projects p
+      INNER JOIN project_assignments pa
+        ON pa.project_id = p.id
+      INNER JOIN users u
+        ON u.id = pa.user_id
+      WHERE pa.role = 'engineer'
+        AND p.active = 1
+        AND (
+          CAST(pa.user_id AS CHAR) = ?
+          OR CAST(u.id AS CHAR) = ?
+          OR CAST(u.employee_id AS CHAR) = ?
+        )
+      ORDER BY p.name ASC
+      `,
+      [engineerId, engineerId, engineerId]
+    );
+
+    return res.json({
+      success: true,
+      projects: rows,
+      data: rows,
+    });
+  } catch (error) {
+    console.error('Get engineer projects error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load engineer projects.',
+      error: error.message,
+    });
+  }
+}
+
+app.get('/api/engineer/projects', loadEngineerProjects);
+app.get('/api/engineer/:engineerId/projects', loadEngineerProjects);
+// ============================================================
 // USERS BY ROLE - FOR PROJECT ASSIGNMENTS
 // ============================================================
 
