@@ -658,6 +658,233 @@ const db = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
 });
+app.get('/api/labors', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT
+        id,
+        labor_code,
+        name,
+        active,
+        assigned_project_id,
+        assigned_project_code,
+        assigned_project_name,
+        qr_token,
+        qr_payload,
+        created_at,
+        updated_at
+      FROM labors
+      ORDER BY updated_at DESC, id DESC
+    `);
+
+    return res.json({
+      success: true,
+      labors: rows,
+      data: rows,
+    });
+  } catch (error) {
+    console.error('Get labors error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load labors.',
+      error: error.message,
+    });
+  }
+});
+app.post('/api/labors', async (req, res) => {
+  try {
+    const body = req.body || {};
+
+    const laborCode = String(body.laborCode || body.labor_code || '').trim();
+    const name = String(body.name || '').trim();
+
+    const active =
+      body.active === true ||
+      body.active === 1 ||
+      body.active === '1'
+        ? 1
+        : 0;
+
+    const assignedProjectId =
+      body.assignedProjectId || body.assigned_project_id || null;
+
+    const assignedProjectCode = String(
+      body.assignedProjectCode || body.assigned_project_code || ''
+    ).trim();
+
+    const assignedProjectName = String(
+      body.assignedProjectName || body.assigned_project_name || ''
+    ).trim();
+
+    if (!laborCode || !name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Labor ID and labor name are required.',
+      });
+    }
+
+    const qrPayload = JSON.stringify({
+      app: 'scale_group',
+      type: 'labor',
+      laborId: laborCode,
+      name,
+    });
+
+    const qrToken = laborCode;
+
+    const [existing] = await db.query(
+      'SELECT id FROM labors WHERE labor_code = ? LIMIT 1',
+      [laborCode]
+    );
+
+    if (existing.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'Labor ID already exists.',
+      });
+    }
+
+    const [result] = await db.query(
+      `
+      INSERT INTO labors (
+        labor_code,
+        name,
+        active,
+        assigned_project_id,
+        assigned_project_code,
+        assigned_project_name,
+        qr_token,
+        qr_payload
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        laborCode,
+        name,
+        active,
+        assignedProjectId,
+        assignedProjectCode,
+        assignedProjectName,
+        qrToken,
+        qrPayload,
+      ]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Labor created successfully.',
+      labor: {
+        id: result.insertId,
+        labor_code: laborCode,
+        name,
+        active,
+        assigned_project_id: assignedProjectId,
+        assigned_project_code: assignedProjectCode,
+        assigned_project_name: assignedProjectName,
+        qr_token: qrToken,
+        qr_payload: qrPayload,
+      },
+    });
+  } catch (error) {
+    console.error('Create labor error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create labor.',
+      error: error.message,
+    });
+  }
+});
+app.put('/api/labors/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const body = req.body || {};
+
+    const laborCode = String(body.laborCode || body.labor_code || '').trim();
+    const name = String(body.name || '').trim();
+
+    const active =
+      body.active === true ||
+      body.active === 1 ||
+      body.active === '1'
+        ? 1
+        : 0;
+
+    const assignedProjectId =
+      body.assignedProjectId || body.assigned_project_id || null;
+
+    const assignedProjectCode = String(
+      body.assignedProjectCode || body.assigned_project_code || ''
+    ).trim();
+
+    const assignedProjectName = String(
+      body.assignedProjectName || body.assigned_project_name || ''
+    ).trim();
+
+    if (!id || !laborCode || !name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Labor ID, labor code, and labor name are required.',
+      });
+    }
+
+    const qrPayload = JSON.stringify({
+      app: 'scale_group',
+      type: 'labor',
+      laborId: laborCode,
+      name,
+    });
+
+    const [result] = await db.query(
+      `
+      UPDATE labors
+      SET
+        labor_code = ?,
+        name = ?,
+        active = ?,
+        assigned_project_id = ?,
+        assigned_project_code = ?,
+        assigned_project_name = ?,
+        qr_token = ?,
+        qr_payload = ?,
+        updated_at = NOW()
+      WHERE id = ?
+      `,
+      [
+        laborCode,
+        name,
+        active,
+        assignedProjectId,
+        assignedProjectCode,
+        assignedProjectName,
+        laborCode,
+        qrPayload,
+        id,
+      ]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Labor not found.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Labor updated successfully.',
+    });
+  } catch (error) {
+    console.error('Update labor error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update labor.',
+      error: error.message,
+    });
+  }
+});
 // ============================================================
 // ENGINEER PROJECTS - RAILWAY MYSQL
 // ============================================================
