@@ -2282,39 +2282,58 @@ app.get('/api/payroll/preview', async (req, res) => {
       });
     }
 
-    const [rows] = await db.query(
-      `
-      SELECT
-        labor_code,
-        labor_name,
-        project_id,
-        project_name,
-        project_code,
+  const [rows] = await db.query(
+  `
+  SELECT
+    labor_code AS labor_id,
+    labor_code AS laborId,
+    labor_code,
+    labor_name,
+    labor_name AS laborName,
+    project_id,
+    project_id AS projectId,
+    project_name,
+    project_name AS projectName,
+    project_code,
 
-        COUNT(*) AS days_worked,
+    COUNT(DISTINCT attendance_date) AS days_worked,
+    COUNT(DISTINCT attendance_date) AS daysWorked,
 
-        MIN(attendance_date) AS period_start,
-        MAX(attendance_date) AS period_end,
+    MIN(attendance_date) AS period_start,
+    MAX(attendance_date) AS period_end,
 
-        0 AS daily_rate,
-        0 AS total_amount
+    0 AS daily_rate,
+    0 AS dailyRate,
+    0 AS total_salary,
+    0 AS totalSalary,
 
-      FROM labor_attendance
+    GROUP_CONCAT(
+      DISTINCT DATE_FORMAT(attendance_date, '%Y-%m-%d')
+      ORDER BY attendance_date
+      SEPARATOR ', '
+    ) AS attendance_dates,
+    GROUP_CONCAT(
+      DISTINCT DATE_FORMAT(attendance_date, '%Y-%m-%d')
+      ORDER BY attendance_date
+      SEPARATOR ', '
+    ) AS attendanceDates
 
-      WHERE attendance_date BETWEEN ? AND ?
-        AND check_in_time IS NOT NULL
+  FROM labor_attendance
 
-      GROUP BY
-        labor_code,
-        labor_name,
-        project_id,
-        project_name,
-        project_code
+  WHERE attendance_date BETWEEN ? AND ?
+    AND check_in_time IS NOT NULL
 
-      ORDER BY labor_name ASC
-      `,
-      [startDate, endDate]
-    );
+  GROUP BY
+    labor_code,
+    labor_name,
+    project_id,
+    project_name,
+    project_code
+
+  ORDER BY labor_name ASC
+  `,
+  [startDate, endDate]
+);
 
     return res.json({
       success: true,
