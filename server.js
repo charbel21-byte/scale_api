@@ -787,7 +787,7 @@ app.post('/api/attendance/scan', async (req, res) => {
           checked_in_by_id,
           checked_in_by_name
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NULL, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 3 HOUR), NULL, ?, ?)
         `,
         [
           labor.id,
@@ -845,10 +845,10 @@ app.post('/api/attendance/scan', async (req, res) => {
       `
       UPDATE labor_attendance
       SET
-        check_out_time = NOW(),
+        check_out_time = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 3 HOUR),
         checked_out_by_id = ?,
         checked_out_by_name = ?,
-        updated_at = NOW()
+        updated_at = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 3 HOUR)
       WHERE id = ?
       `,
       [
