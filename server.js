@@ -2768,6 +2768,90 @@ app.get('/api/senior/payroll/periods/:id/items', async (req, res) => {
   }
 });
 // ============================================================
+// SENIOR ACCOUNTANT - MARK PAYROLL ITEM AS PAID
+// ============================================================
+
+app.patch('/api/senior/payroll/items/:itemId/mark-paid', async (req, res) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const body = req.body || {};
+
+    const paidById = String(
+      body.paidById || body.paid_by_uid || body.seniorId || ''
+    ).trim();
+
+    const paidByName = String(
+      body.paidByName || body.paid_by_name || body.seniorName || ''
+    ).trim();
+
+    const paidFrom = String(body.paidFrom || body.paid_from || '').trim();
+    const paidTo = String(body.paidTo || body.paid_to || '').trim();
+
+    if (!itemId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payroll item ID is required.',
+      });
+    }
+
+    const [existing] = await db.query(
+      `
+      SELECT id, paid
+      FROM payroll_items
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [itemId]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payroll item not found.',
+      });
+    }
+
+    await db.query(
+      `
+      UPDATE payroll_items
+      SET
+        paid = 1,
+        paid_from = ?,
+        paid_to = ?,
+        paid_at = NOW(),
+        paid_by_uid = ?,
+        paid_by_name = ?,
+        payment_status = 'markedPaidBySenior',
+        updated_at = NOW()
+      WHERE id = ?
+      `,
+      [
+        paidFrom || null,
+        paidTo || null,
+        paidById,
+        paidByName,
+        itemId,
+      ]
+    );
+
+    return res.json({
+      success: true,
+      message: 'Labor marked as paid successfully.',
+      item_id: itemId,
+      paid: 1,
+      payment_status: 'markedPaidBySenior',
+    });
+  } catch (error) {
+    console.error('Mark payroll item paid error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to mark labor as paid.',
+      error: error.message,
+    });
+  }
+});
+// ============================================================
 // PROJECTS - GENERAL LIST
 // ============================================================
 app.get('/api/projects', async (req, res) => {
