@@ -2381,7 +2381,8 @@ app.post('/api/payroll/submit-to-senior', async (req, res) => {
       });
     }
 
-    const periodKey = `${startDate}_to_${endDate}`;
+    const projectId = String(body.projectId || body.project_id || '').trim();
+const periodKey = `${projectId}_${startDate}_to_${endDate}`;
     const laborCount = items.length;
 
     const grandTotal = items.reduce((sum, item) => {
