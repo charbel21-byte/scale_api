@@ -666,7 +666,230 @@ function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
+app.post('/api/attendance/scan', async (req, res) => {
+  const connection = await db.getConnection();
 
+  try {
+    const body = req.body || {};
+
+    const projectId = String(
+      body.projectId || body.project_id || ''
+    ).trim();
+
+    const projectNameFromApp = String(
+      body.projectName || body.project_name || ''
+    ).trim();
+
+    const laborCodeFromApp = String(
+      body.laborId || body.labor_id || body.laborCode || body.labor_code || ''
+    ).trim();
+
+    const date = String(
+      body.date || body.attendanceDate || body.attendance_date || todayDate()
+    ).trim();
+
+    const foremanId = String(
+      body.foremanId || body.foreman_id || body.foreman_uid || ''
+    ).trim();
+
+    const foremanName = String(
+      body.foremanName || body.foreman_name || ''
+    ).trim();
+
+    if (!projectId || !laborCodeFromApp || !date) {
+      return res.status(400).json({
+        success: false,
+        message: 'Project ID, labor ID, and date are required.',
+      });
+    }
+
+    await connection.beginTransaction();
+
+    const [laborRows] = await connection.query(
+      `
+      SELECT
+        id,
+        labor_code,
+        name,
+        assigned_project_id,
+        assigned_project_code,
+        assigned_project_name
+      FROM labors
+      WHERE labor_code = ?
+         OR qr_token = ?
+         OR CAST(id AS CHAR) = ?
+      LIMIT 1
+      `,
+      [laborCodeFromApp, laborCodeFromApp, laborCodeFromApp]
+    );
+
+    if (laborRows.length === 0) {
+      await connection.rollback();
+
+      return res.status(404).json({
+        success: false,
+        message: 'Labor not found.',
+      });
+    }
+
+    const labor = laborRows[0];
+
+    const [projectRows] = await connection.query(
+      `
+      SELECT
+        id,
+        name,
+        code
+      FROM projects
+      WHERE CAST(id AS CHAR) = ?
+      LIMIT 1
+      `,
+      [projectId]
+    );
+
+    const project = projectRows.length > 0
+      ? projectRows[0]
+      : {
+          id: projectId,
+          name: projectNameFromApp,
+          code: '',
+        };
+
+    const [existingRows] = await connection.query(
+      `
+      SELECT
+        id,
+        check_in_time,
+        check_out_time
+      FROM labor_attendance
+      WHERE labor_code = ?
+        AND project_id = ?
+        AND attendance_date = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [labor.labor_code, projectId, date]
+    );
+
+    if (existingRows.length === 0) {
+      const [insertResult] = await connection.query(
+        `
+        INSERT INTO labor_attendance (
+          labor_id,
+          labor_code,
+          labor_name,
+          project_id,
+          project_name,
+          project_code,
+          attendance_date,
+          check_in_time,
+          check_out_time,
+          checked_in_by_id,
+          checked_in_by_name
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NULL, ?, ?)
+        `,
+        [
+          labor.id,
+          labor.labor_code,
+          labor.name,
+          project.id,
+          project.name || projectNameFromApp,
+          project.code || '',
+          date,
+          foremanId,
+          foremanName,
+        ]
+      );
+
+      await connection.commit();
+
+      return res.status(201).json({
+        success: true,
+        id: insertResult.insertId,
+        action: 'checkIn',
+        status: 'checkedIn',
+        message: `Check-in saved for ${labor.name}.`,
+        laborId: labor.id,
+        laborCode: labor.labor_code,
+        laborName: labor.name,
+        projectId: project.id,
+        projectName: project.name || projectNameFromApp,
+        projectCode: project.code || '',
+        attendanceDate: date,
+      });
+    }
+
+    const existing = existingRows[0];
+
+    if (existing.check_out_time) {
+      await connection.commit();
+
+      return res.json({
+        success: true,
+        id: existing.id,
+        action: 'alreadyCheckedOut',
+        status: 'checkedOut',
+        message: `${labor.name} is already checked out for this date.`,
+        laborId: labor.id,
+        laborCode: labor.labor_code,
+        laborName: labor.name,
+        projectId: project.id,
+        projectName: project.name || projectNameFromApp,
+        projectCode: project.code || '',
+        attendanceDate: date,
+      });
+    }
+
+    await connection.query(
+      `
+      UPDATE labor_attendance
+      SET
+        check_out_time = NOW(),
+        checked_out_by_id = ?,
+        checked_out_by_name = ?,
+        updated_at = NOW()
+      WHERE id = ?
+      `,
+      [
+        foremanId,
+        foremanName,
+        existing.id,
+      ]
+    );
+
+    await connection.commit();
+
+    return res.json({
+      success: true,
+      id: existing.id,
+      action: 'checkOut',
+      status: 'checkedOut',
+      message: `Check-out saved for ${labor.name}.`,
+      laborId: labor.id,
+      laborCode: labor.labor_code,
+      laborName: labor.name,
+      projectId: project.id,
+      projectName: project.name || projectNameFromApp,
+      projectCode: project.code || '',
+      attendanceDate: date,
+    });
+  } catch (error) {
+    try {
+      await connection.rollback();
+    } catch (_) {}
+
+    console.error('Attendance scan error:', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to save attendance scan.',
+      error: error.message,
+    });
+  } finally {
+    connection.release();
+  }
+});
 // ============================================================
 // FOREMAN - TODAY PROJECT ATTENDANCE
 // ============================================================
@@ -2932,58 +3155,7 @@ app.get('/api/foreman/:foremanId/projects', loadForemanProjects);
 // ============================================================
 // FOREMAN - PROJECT ATTENDANCE TODAY
 // ============================================================
-app.get('/api/attendance/project/:projectId/today', async (req, res) => {
-  try {
-    const projectId = String(req.params.projectId || '').trim();
-    const date = String(req.query.date || '').trim();
 
-    if (!projectId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Project ID is required.',
-      });
-    }
-
-    const targetDate = date || new Date().toISOString().slice(0, 10);
-
-    const [rows] = await db.query(
-      `
-      SELECT
-        id,
-        project_id,
-        project_name,
-        labor_id,
-        labor_name,
-        date,
-        status,
-        check_in_at,
-        check_out_at,
-        created_at,
-        updated_at
-      FROM attendance
-      WHERE project_id = ?
-        AND date = ?
-      ORDER BY updated_at DESC
-      `,
-      [projectId, targetDate]
-    );
-
-    return res.json({
-      success: true,
-      attendance: rows,
-      records: rows,
-      data: rows,
-    });
-  } catch (error) {
-    console.error('Get project attendance today error:', error);
-
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to load project attendance.',
-      error: error.message,
-    });
-  }
-});
 // ============================================================
 // ADMIN - FINAL APPROVALS LIST
 // ============================================================
@@ -3267,7 +3439,7 @@ app.post('/api/payroll', async (req, res) => {
 // ============================================================
 
 
-    const total_salary = Number(days_worked) * Number(daily_rate);
+    const total_salary = Number(days_worked) * Number(  daily_rate);
 
     const sql = `
       INSERT INTO payroll (
