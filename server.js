@@ -2720,28 +2720,34 @@ app.get('/api/senior/payroll/periods/:id/items', async (req, res) => {
       });
     }
 
-    const [items] = await db.query(
-      `
-      SELECT
-        id,
-        payroll_period_id,
-        labor_id,
-        labor_name,
-        project_id,
-        project_name,
-        days_worked,
-        daily_rate,
-        total_salary,
-        attendance_dates,
-        note,
-        created_at
-      FROM payroll_items
-      WHERE payroll_period_id = ?
-      ORDER BY project_name ASC, labor_name ASC
-      `,
-      [periodId]
-    );
-
+  const [items] = await db.query(
+  `
+  SELECT
+    id,
+    payroll_period_id,
+    labor_id,
+    labor_name,
+    project_id,
+    project_name,
+    days_worked,
+    daily_rate,
+    total_salary,
+    attendance_dates,
+    note,
+    paid,
+    paid_from,
+    paid_to,
+    paid_at,
+    paid_by_uid,
+    paid_by_name,
+    payment_status,
+    created_at
+  FROM payroll_items
+  WHERE payroll_period_id = ?
+  ORDER BY project_name ASC, labor_name ASC
+  `,
+  [periodId]
+);
     return res.json({
       success: true,
       period: periods[0],
